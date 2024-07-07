@@ -46,6 +46,8 @@ struct EntryParams {
     const char* argv[3];
 };
 
+void* RunThread(VAddr addr, void* arg);
+
 struct HeapAPI {
     PS4_SYSV_ABI void* (*heap_malloc)(size_t);
     PS4_SYSV_ABI void (*heap_free)(void*);
