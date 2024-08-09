@@ -619,6 +619,8 @@ set(IMGUI src/imgui/imgui_config.h
 
 set(INPUT src/input/controller.cpp
           src/input/controller.h
+          src/input/devices/devices.h
+          src/input/devices/sdl_keyboard.cpp
 )
 
 set(EMULATOR src/emulator.cpp

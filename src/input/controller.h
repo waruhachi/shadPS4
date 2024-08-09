@@ -5,6 +5,7 @@
 
 #include <mutex>
 #include "common/types.h"
+#include "devices/devices.h"
 
 struct SDL_Gamepad;
 
@@ -71,6 +72,7 @@ private:
     std::array<State, MAX_STATES> m_states;
     std::array<StateInternal, MAX_STATES> m_private;
 
+    std::unique_ptr<InputDevices> m_device;
     SDL_Gamepad* m_sdl_gamepad = nullptr;
 };
 
