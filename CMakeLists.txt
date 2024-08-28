@@ -549,6 +549,8 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
 
 set(INPUT src/input/controller.cpp
           src/input/controller.h
+          src/input/mouse.cpp
+          src/input/mouse.h
 )
 
 set(EMULATOR src/emulator.cpp
