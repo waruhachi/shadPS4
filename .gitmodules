@@ -93,3 +93,6 @@
 [submodule "externals/pugixml"]
 	path = externals/pugixml
 	url = https://github.com/zeux/pugixml.git
+[submodule "externals/hex-emu"]
+	path = externals/hex-emu
+	url = git@gitlab.com:hex-emu/hex-emu.git

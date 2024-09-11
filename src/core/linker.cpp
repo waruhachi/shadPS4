@@ -19,12 +19,75 @@
 #include "core/tls.h"
 #include "core/virtual_memory.h"
 
+#include <unistd.h>
+#include <fcntl.h>
+#include "Config/Config.h"
+#include "Config/ConfigLoader.h"
+
+#include "Common/Paths.h"
+
+#include "GuestCPU/Context/Context.h"
+#include "GuestCPU/Context/GuestState.h"
+#include "GuestCPU/Translator/Decoder/X86Tables/X86Tables.h"
+#include "GuestCPU/Translator/OpcodeDispatcher/OpcodeDispatcher.h"
+
 namespace Core {
 
 using ExitFunc = PS4_SYSV_ABI void (*)();
 
 static PS4_SYSV_ABI void ProgramExitFunc() {
     fmt::print("exit function called\n");
+}
+
+static void InitializeStaticTables(FEXCore::Context::OperatingMode Mode) {
+  FEXCore::X86Tables::InitializeInfoTables(Mode);
+  FEXCore::IR::InstallOpcodeHandlers(Mode);
+}
+
+static int OutputFD {2};
+
+void MsgHandler(LogMan::DebugLevels Level, char const *Message) {
+
+  const char *CharLevel{nullptr};
+
+  switch (Level) {
+  case LogMan::NONE:
+    CharLevel = "NONE";
+    break;
+  case LogMan::ASSERT:
+    CharLevel = "ASSERT";
+    break;
+  case LogMan::ERROR:
+    CharLevel = "ERROR";
+    break;
+  case LogMan::DEBUG:
+    CharLevel = "DEBUG";
+    break;
+  case LogMan::INFO:
+    CharLevel = "Info";
+    break;
+  case LogMan::STDOUT:
+    CharLevel = "STDOUT";
+    break;
+  case LogMan::STDERR:
+    CharLevel = "STDERR";
+    break;
+  default:
+    CharLevel = "???";
+    break;
+  }
+
+  const auto Output = fmt::format("[{}] {}\n", CharLevel, Message);
+  write(OutputFD, Output.c_str(), Output.size());
+  fsync(OutputFD);
+}
+
+void AssertHandler(char const *Message) {
+
+
+  const auto Output = fmt::format("[ASSERT] {}\n", Message);
+  write(OutputFD, Output.c_str(), Output.size());
+  fsync(OutputFD);
 }
 
 static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
@@ -49,6 +112,52 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
                  : "r"(addr), "r"(params), "r"(exit_func)
                  : "rax", "rsi", "rdi");
 #else
+  LogMan::Throw::InstallHandler(AssertHandler);
+  LogMan::Msg::InstallHandler(MsgHandler);
+
+FEXCore::Config::Initialize();
+FEXCore::Config::ReloadMetaLayer();
+     FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, "1");
+    InitializeStaticTables(FEXCore::Context::MODE_64BIT);
+
+   auto CTX = new FEXCore::Context::Context();
+   CTX->CPUID.Init(CTX);
+
+    //  SyscallHandler->SetCodeLoader(&Loader);
+
+  
+//   CTX->SignalDelegation = SignalDelegation.get();
+
+//   CTX->SyscallHandler = SyscallHandler.get();
+//   CTX->SourcecodeResolver = SyscallHandler->GetSourcecodeResolver();
+  CTX->X86CodeGen.Init(CTX);
+  uintptr_t stack_top = 8 * 1024 * 1024 + (uintptr_t)malloc(8 * 1024 * 1024);
+  FEXCore::Core::InternalThreadState* thread = CTX->InitCore(addr, stack_top);
+
+ {
+        auto& rsp = thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RSP];
+        auto& rsi = thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RSI];
+        auto& rdi = thread->CurrentFrame->State.gregs[FEXCore::X86State::REG_RDI];
+
+        rsp = stack_top;
+
+        rsp = rsp & ~16;
+        rsp = rsp - 8;
+
+        for (int i = params->argc; i > 0; i--) {
+            rsp = rsp - 8;
+            *(void**)rsp = &params->argv[i - 1];
+        }
+
+        rsp = rsp - 8;
+        *(u64*)rsp = params->argc;
+
+        rsi = (u64)params;
+        rdi = (u64)exit_func;
+    }
+
+  CTX->RunUntilExit();
+  
     UNIMPLEMENTED_MSG("Missing RunMainEntry() implementation for target CPU architecture.");
 #endif
 }

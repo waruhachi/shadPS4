@@ -183,3 +183,8 @@ add_subdirectory(tracy)
 if (NOT TARGET pugixml::pugixml)
     add_subdirectory(pugixml)
 endif()
+
+# Zydis
+if (NOT TARGET hex-emu::hex-core)
+    add_subdirectory(hex-emu/hex-core)
+endif()
