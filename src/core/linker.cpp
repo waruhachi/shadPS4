@@ -19,6 +19,7 @@
 #include "core/tls.h"
 #include "core/virtual_memory.h"
 
+#include <set>
 #include <unistd.h>
 #include <fcntl.h>
 #include "Config/Config.h"
@@ -90,6 +91,13 @@ void AssertHandler(char const *Message) {
   fsync(OutputFD);
 }
 
+std::unordered_set<u64> trampoline_entries;
+
+void GenerateTrampoline(u64 hle_handler) {
+    LOG_INFO(Core_Linker, "Adding trampoline {:#010x}", hle_handler);
+    trampoline_entries.insert(hle_handler);
+}
+
 static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
 #ifdef ARCH_X86_64
     // reinterpret_cast<entry_func_t>(addr)(params, exit_func); // can't be used, stack has to have
@@ -118,9 +126,10 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
 FEXCore::Config::Initialize();
 FEXCore::Config::ReloadMetaLayer();
      FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, "1");
+     FEXCore::Config::Set(FEXCore::Config::CONFIG_ENABLEAVX, "1");
     InitializeStaticTables(FEXCore::Context::MODE_64BIT);
 
-   auto CTX = new FEXCore::Context::Context();
+   FEXCore::Context::Context* CTX = new FEXCore::Context::Context();
    CTX->CPUID.Init(CTX);
 
     //  SyscallHandler->SetCodeLoader(&Loader);
@@ -154,6 +163,25 @@ FEXCore::Config::ReloadMetaLayer();
 
         rsi = (u64)params;
         rdi = (u64)exit_func;
+    }
+
+    for (auto& entry : trampoline_entries) {
+        CTX->AddCustomIREntrypoint(entry, [entry](uintptr_t Entrypoint, FEXCore::IR::IREmitter* emit) {
+            using namespace FEXCore;
+            auto IRHeader = emit->_IRHeader(emit->Invalid(), 0);
+            auto Block = emit->CreateCodeNode();
+            IRHeader.first->Blocks = emit->WrapNode(Block);
+            emit->SetCurrentCodeBlock(Block);
+
+            const uint8_t GPRSize = 8;
+            
+            emit->  _Break(emit->_Constant(entry), FEXCore::IR::BreakDefinition {
+                .ErrorRegister = 0,
+                .Signal = 254,
+                .TrapNumber = 0,
+                .si_code = 0,
+            });
+        }, nullptr, nullptr);
     }
 
   CTX->RunUntilExit();
@@ -392,6 +420,7 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     }
     if (record) {
         *return_info = *record;
+        GenerateTrampoline(return_info->virtual_address);
         return true;
     }
 
@@ -405,6 +434,7 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     }
     LOG_ERROR(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
               return_info->name, library->name, module->name);
+    GenerateTrampoline(return_info->virtual_address);
     return false;
 }
 
