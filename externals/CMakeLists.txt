@@ -183,3 +183,8 @@ add_subdirectory(tracy)
 if (NOT TARGET pugixml::pugixml)
     add_subdirectory(pugixml)
 endif()
+
+# box64-core
+if (NOT TARGET box64-core)
+    add_subdirectory(box64/box64-core)
+endif()

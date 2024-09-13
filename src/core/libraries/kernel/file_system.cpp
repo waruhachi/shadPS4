@@ -223,7 +223,9 @@ s64 PS4_SYSV_ABI sceKernelLseek(int d, s64 offset, int whence) {
 
     std::scoped_lock lk{file->m_mutex};
     file->f.Seek(offset, origin);
-    return file->f.Tell();
+    auto rv = file->f.Tell();
+
+    return rv;
 }
 
 s64 PS4_SYSV_ABI posix_lseek(int d, s64 offset, int whence) {

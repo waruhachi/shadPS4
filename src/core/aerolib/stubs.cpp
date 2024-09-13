@@ -78,7 +78,12 @@ u64 GetStub(const char* nid) {
         stub_nids[UsedStubEntries] = entry;
     }
 
-    return (u64)stub_handlers[UsedStubEntries++];
+        uint8_t* code = (uint8_t*)malloc(13); \
+        code[0] = 0xCD; \
+        code[1] = 0x13; \
+        code[2] = 0xC3; \
+        memcpy(code + 3, &stub_handlers[UsedStubEntries++], 8); \
+    return (u64)code;
 }
 
 } // namespace Core::AeroLib

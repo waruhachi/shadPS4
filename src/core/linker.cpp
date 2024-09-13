@@ -19,6 +19,224 @@
 #include "core/tls.h"
 #include "core/virtual_memory.h"
 
+#include <unordered_map>
+#include <unistd.h>
+#include <fcntl.h>
+extern "C" {
+    #include "x64emu.h"
+    #include "x64run.h"
+    #include "box64context.h"
+    #include "regs.h"
+    #include "externals/box64/src/emu/x64emu_private.h"
+
+
+box64context_t *my_context = NULL;
+    int box64_dynarec_test = 0;
+    int box64_log = 2; //2 is debug; //LOG_NONE;
+    int box64_dynarec_log = 0;
+
+    int box64_ignoreint3 = 0;
+    int box64_is32bits = 0;
+    int box64_wine = 0;
+    int box64_rdtsc = 0;
+    int box64_rdtsc_1ghz = 0;
+    uint8_t box64_rdtsc_shift = 0;
+    int box64_sse_flushto0 = 0;
+    int box64_x87_no80bits = 0;
+    int box64_sync_rounding = 0;
+    int box64_shaext = 1;
+    int box64_sse42 = 1;
+    int box64_avx = 1;
+    int box64_avx2 = 1;
+    int cycle_log = 0;
+    int box64_mapclean = 0;
+    int box64_dynarec = 1;
+    uintptr_t box64_pagesize = 16 * 1024;
+
+    int box64_dynarec_dump = 0;
+    int box64_dynarec_forced = 0;
+    int box64_dynarec_bigblock = 1;
+    int box64_dynarec_forward = 128;
+    int box64_dynarec_strongmem = 0;
+    int box64_dynarec_x87double = 0;
+    int box64_dynarec_div0 = 0;
+    int box64_dynarec_fastnan = 1;
+    int box64_dynarec_fastround = 1;
+    int box64_dynarec_safeflags = 1;
+    int box64_dynarec_callret = 0;
+    int box64_dynarec_bleeding_edge = 1;
+    int box64_dynarec_tbb = 1;
+    int box64_dynarec_wait = 1;
+    int box64_dynarec_missing = 0;
+    int box64_dynarec_aligned_atomics = 0;
+    uintptr_t box64_nodynarec_start = 0;
+    uintptr_t box64_nodynarec_end = 0;
+    uintptr_t box64_dynarec_test_start = 0;
+    uintptr_t box64_dynarec_test_end = 0;
+
+    int arm64_asimd = 1;
+    int arm64_aes = 1;
+    int arm64_pmull = 1;
+    int arm64_crc32 = 1;
+    int arm64_atomics = 1;
+    int arm64_sha1 = 1;
+    int arm64_sha2 = 1;
+    int arm64_uscat = 1;
+    int arm64_flagm = 1;
+    int arm64_flagm2 = 1;
+    int arm64_frintts = 1;
+    int arm64_afp = 1;
+    int arm64_rndr = 1;
+
+    uint32_t default_gs = 0x53;
+    uint32_t default_fs = 0x53;
+    int box64_maxcpu = 0;
+    void emit_signal(x64emu_t* emu, int sig, void* addr, int code) {
+        for(;;) {
+            printf("Signal %d at %p with code %d\n", sig, addr, code);
+        }
+    }
+    void emit_div0(x64emu_t* emu, void* addr, int code) {
+        for(;;) {
+            printf("Divide by 0 at %p with code %d\n", addr, code);
+        }
+    }
+    void emit_interruption(x64emu_t* emu, int num, void* addr) {
+        if (num == 19) {
+            using HLEFunc = PS4_SYSV_ABI uint64_t (*)(
+                uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                double, double, double, double, double, double, double, double);
+
+            HLEFunc hleFunc;
+            memcpy(&hleFunc, (uint8_t*)addr + 1, 8);
+            asm volatile(
+                "mov x0, %4\n"
+                "mov x1, %5\n"
+                "mov x2, %6\n"
+                "mov x3, %7\n"
+                "mov x4, %8\n"
+                "mov x5, %9\n"
+
+                "mov v0.16b, %10.16b\n"
+                "mov v1.16b, %11.16b\n"
+                "mov v2.16b, %12.16b\n"
+                "mov v3.16b, %13.16b\n"
+                "mov v4.16b, %14.16b\n"
+                "mov v5.16b, %15.16b\n"
+                "mov v6.16b, %16.16b\n"
+                "mov v7.16b, %17.16b\n"
+                "blr %18\n"
+                "mov %0, x0\n"
+                "mov %1, x1\n"
+                "mov %2.16b, v0.16b\n"
+                "mov %3.16b, v1.16b\n"
+                : "=r"(emu->regs[_RAX].q[0]), "=r"(emu->regs[_RDX].q[0]), "=w"(emu->xmm[0].u128), "=w"(emu->xmm[1].u128)
+                : "r"(emu->regs[_RDI].q[0]), "r"(emu->regs[_RSI].q[0]), "r"(emu->regs[_RDX].q[0]), "r"(emu->regs[_RCX].q[0]),
+                  "r"(emu->regs[_R8].q[0]), "r"(emu->regs[_R9].q[0]),  "w"(emu->xmm[0].u128), "w"(emu->xmm[1].u128), "w"(emu->xmm[2].u128),
+                  "w"(emu->xmm[3].u128), "w"(emu->xmm[4].u128), "w"(emu->xmm[5].u128), "w"(emu->xmm[6].u128),
+                  "w"(emu->xmm[7].u128), "r"(hleFunc)
+                : "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",  // Clobber volatile general-purpose registers
+                    "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17",
+                    "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",  // Clobber volatile SIMD registers
+                    "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", 
+                    "memory", "cc"  // Clobber memory and condition codes
+            );
+            // emu->regs[_RAX].q[0] = hleFunc(
+            //     emu->regs[_RDI].q[0],
+            //     emu->regs[_RSI].q[0],
+            //     emu->regs[_RDX].q[0],
+            //     emu->regs[_RCX].q[0],
+            //     emu->regs[_R8].q[0],
+            //     emu->regs[_R9].q[0],
+
+            //     emu->xmm[0].d[0],
+            //     emu->xmm[1].d[0],
+            //     emu->xmm[2].d[0],
+            //     emu->xmm[3].d[0],
+
+            //     emu->xmm[4].d[0],
+            //     emu->xmm[5].d[0],
+            //     emu->xmm[6].d[0],
+            //     emu->xmm[7].d[0]
+            // );
+        } else if (num == 20) {
+            emu->quit = 1;
+        } else {
+            for(;;) {
+                printf("Interruption %d at %p\n", num, addr);
+            }
+        }
+    }
+    
+    void x64Syscall(x64emu_t *emu) {
+        for(;;) {
+            printf("Syscall\n");
+        }
+    }
+    void x86Syscall(x64emu_t *emu) {
+        for(;;) {
+            printf("Syscall\n");
+        }
+    }
+
+    void printf_ftrace(const char* fmt, ...)
+    {
+
+        va_list args;
+        va_start(args, fmt);
+        vprintf(fmt, args);
+
+        va_end(args);
+    }
+    int printFunctionAddr(uintptr_t nextaddr, const char* text) {
+        printf("Function address %p with text %s\n", (void*)nextaddr, text);
+        return 0;
+    }
+    void PltResolver64(x64emu_t* emu) {
+        for(;;) {
+            printf("PltResolver64\n");
+        }
+    }
+
+    int isRetX87Wrapper(uint64_t fun) {
+        return 0;
+    }
+    int isSimpleWrapper(uint64_t fun) {
+        return 0;
+    }
+
+    int isAddrInPrereserve(uintptr_t addr) {
+        return 0;
+    }
+
+    void* FindElfAddress(box64context_t *context, uintptr_t addr)
+    {
+        
+        return NULL;
+    }
+
+    const char* GetNativeName(void* p)
+    {
+        return "NativeName";
+    }
+
+    void* GetSegmentBase(uint32_t desc)
+    {
+        printf("GetSegmentBase\n");
+        return NULL;
+    }
+
+    uint64_t RunFunctionWithEmu(x64emu_t *emu, int QuitOnLongJump, uintptr_t fnc, int nargs, ...) {
+        for(;;) {
+            printf("RunFunctionWithEmu\n");
+        }
+    }
+
+    const char* SymName64(void *h, void* sym) {
+        return "SymName64";
+    }
+}
+
 namespace Core {
 
 using ExitFunc = PS4_SYSV_ABI void (*)();
@@ -26,6 +244,10 @@ using ExitFunc = PS4_SYSV_ABI void (*)();
 static PS4_SYSV_ABI void ProgramExitFunc() {
     fmt::print("exit function called\n");
 }
+
+
+box64context_t *my_context;
+thread_local x64emu_t *emu;
 
 static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
 #ifdef ARCH_X86_64
@@ -49,6 +271,34 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
                  : "r"(addr), "r"(params), "r"(exit_func)
                  : "rax", "rsi", "rdi");
 #else
+
+uint64_t rsp = GetRSP(emu);
+
+rsp = rsp & ~16;
+uint8_t* code = (uint8_t*)malloc(2);
+            code[0] = 0xCD;
+            code[1] = 0x14;
+            rsp -= 8;
+
+        for (int i = params->argc; i > 0; i--) {
+            rsp = rsp - 8;
+            *(void**)rsp = &params->argv[i - 1];
+        }
+
+        rsp = rsp - 8;
+        *(u64*)rsp = params->argc;
+
+        uint64_t rsi = (u64)params;
+        uint64_t rdi = (u64)exit_func;
+
+        SetRIP(emu, addr);
+        SetRSP(emu, rsp);
+        SetRSI(emu, rsi);
+        SetRDI(emu, rdi);
+        emu->quit = 0;
+
+        Run(emu, 0);
+
     UNIMPLEMENTED_MSG("Missing RunMainEntry() implementation for target CPU architecture.");
 #endif
 }
@@ -96,10 +346,35 @@ void Linker::Execute() {
     Libraries::Kernel::pthreadInitSelfMainThread();
     InitTlsForThread(true);
 
+    my_context = NewBox64Context(0);
+    emu = NewX64Emu(my_context, 0, (uintptr_t)0, 0, 0);
+
+    thread_set_emu(emu);
+
+    uintptr_t stack_top = 8 * 1024 * 1024 + (uintptr_t)malloc(8 * 1024 * 1024);
+
     // Start shared library modules
     for (auto& m : m_modules) {
         if (m->IsSharedLib()) {
-            m->Start(0, nullptr, nullptr);
+            // m->Start(0, nullptr, nullptr);
+            LOG_DEBUG(Core_Linker, "Starting shared library module {}", m->name);
+            const VAddr addr = m->dynamic_info.init_virtual_addr + m->GetBaseAddress();
+            uint8_t* code = (uint8_t*)malloc(2);
+            code[0] = 0xCD;
+            code[1] = 0x14;
+            uint64_t rsp = stack_top;
+            rsp &= ~16;
+            rsp -= 8;
+            *(uint8_t**)rsp = code;
+
+            SetRIP(emu, addr);
+            SetRSP(emu, rsp);
+            SetRDI(emu, 0);
+            SetRSI(emu, 0);
+            SetRDX(emu, 0);
+
+            emu->quit = 0;
+            Run(emu, 0);
         }
     }
 
@@ -110,6 +385,8 @@ void Linker::Execute() {
 
     for (auto& m : m_modules) {
         if (!m->IsSharedLib()) {
+            LOG_DEBUG(Core_Linker, "Starting main library module {}", m->name);
+            SetRSP(emu, stack_top);
             RunMainEntry(m->GetEntryAddress(), &p, ProgramExitFunc);
         }
     }
@@ -274,6 +551,7 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     sr.type = sym_type;
 
     const auto* record = m_hle_symbols.FindSymbol(sr);
+
     if (!record) {
         // Check if it an export function
         const auto* p = FindExportedModule(*module, *library);
@@ -283,6 +561,7 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     }
     if (record) {
         *return_info = *record;
+
         return true;
     }
 

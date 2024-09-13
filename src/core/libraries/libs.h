@@ -28,6 +28,7 @@ struct wrapper_impl<name, PS4_SYSV_ABI R (*)(Args...), f> {
             std::string_view(name.value) != "sceUserServiceGetEvent") {
             // LOG_WARNING(Core_Linker, "Function {} called", name.value);
         }
+        LOG_WARNING(Core_Linker, "Function {} called", name.value);
         if constexpr (std::is_same_v<R, s32> || std::is_same_v<R, u32>) {
             const u32 ret = f(args...);
             if (ret != 0 && std::string_view(name.value) != "scePthreadEqual") {
@@ -43,8 +44,8 @@ struct wrapper_impl<name, PS4_SYSV_ABI R (*)(Args...), f> {
 template <StringLiteral name, class F, F f>
 constexpr auto wrapper = wrapper_impl<name, F, f>::wrap;
 
-// #define W(foo) wrapper<#foo, decltype(&foo), foo>
-#define W(foo) foo
+#define W(foo) wrapper<#foo, decltype(&foo), foo>
+// #define W(foo) foo
 
 #define LIB_FUNCTION(nid, lib, libversion, mod, moduleVersionMajor, moduleVersionMinor, function)  \
     {                                                                                              \
@@ -57,7 +58,12 @@ constexpr auto wrapper = wrapper_impl<name, F, f>::wrap;
         sr.module_version_minor = moduleVersionMinor;                                              \
         sr.type = Core::Loader::SymbolType::Function;                                              \
         auto func = reinterpret_cast<u64>(W(function));                                            \
-        sym->AddSymbol(sr, func);                                                                  \
+        uint8_t* code = (uint8_t*)malloc(13); \
+        code[0] = 0xCD; \
+        code[1] = 0x13; \
+        code[2] = 0xC3; \
+        memcpy(code + 3, &func, 8); \
+        sym->AddSymbol(sr, (u64)code);                                                                  \
     }
 
 #define LIB_OBJ(nid, lib, libversion, mod, moduleVersionMajor, moduleVersionMinor, function)       \
