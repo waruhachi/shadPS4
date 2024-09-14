@@ -22,6 +22,9 @@
 #include <unordered_map>
 #include <unistd.h>
 #include <fcntl.h>
+
+void set_thread_affinity();
+
 extern "C" {
     #include "x64emu.h"
     #include "x64run.h"
@@ -305,6 +308,7 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
     SetRSI(emu, rsi);
     emu->quit = 0;
 
+    set_thread_affinity();
     Run(emu, 0);
 
     UNIMPLEMENTED_MSG("Missing RunMainEntry() implementation for target CPU architecture.");
@@ -334,6 +338,7 @@ void* RunThreadEntry(u64 thread, void* arg) {
 
     emu->quit = 0;
 
+    set_thread_affinity();
     Run(emu, 0);
 
     auto rv = emu->regs[_RAX].q[0];
@@ -414,6 +419,7 @@ void Linker::Execute() {
             SetRDX(emu, 0);
 
             emu->quit = 0;
+            set_thread_affinity();
             Run(emu, 0);
         }
     }
@@ -648,6 +654,7 @@ void* heap_api_malloc(Core::HeapAPI* heap_api, size_t size) {
     SetRSP(emu, rsp);
     SetRDI(emu, size);
 
+    set_thread_affinity();
     Run(emu, 0);
 
     return (void*)emu->regs[_RAX].q[0];
