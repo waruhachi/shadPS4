@@ -24,6 +24,7 @@
 
 #include <set>
 #include <cinttypes>
+#include <functional>
 
 
 namespace Core {
