@@ -26,6 +26,9 @@
 #include <sys/mman.h>
 #endif
 
+namespace Core {
+    void* RunThreadEntry(u64 thread, void* arg);
+}
 namespace Libraries::Kernel {
 
 thread_local ScePthread g_pthread_self{};
@@ -994,13 +997,12 @@ static void* run_thread(void* arg) {
 #ifdef ARCH_X86_64
     Core::InitializeThreadPatchStack();
 #endif
-    auto* linker = Common::Singleton<Core::Linker>::Instance();
-    linker->InitTlsForThread(false);
     void* ret = nullptr;
     g_pthread_self = thread;
     pthread_cleanup_push(cleanup_thread, thread);
     thread->is_started = true;
-    ret = thread->entry(thread->arg);
+    ret = Core::RunThreadEntry((u64)thread->entry, thread->arg);
+    // ret = thread->entry(thread->arg);
     pthread_cleanup_pop(1);
     return ret;
 }

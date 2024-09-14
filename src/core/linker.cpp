@@ -107,6 +107,7 @@ box64context_t *my_context = NULL;
                 uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
                 double, double, double, double, double, double, double, double);
 
+            auto return_addr = *(uint64_t*)(emu->regs[_RSP].q[0]);
             HLEFunc hleFunc;
             memcpy(&hleFunc, (uint8_t*)addr + 1, 8);
             asm volatile(
@@ -116,6 +117,8 @@ box64context_t *my_context = NULL;
                 "mov x3, %7\n"
                 "mov x4, %8\n"
                 "mov x5, %9\n"
+                "mov x6, %19\n"
+                "mov x7, %20\n"
 
                 "mov v0.16b, %10.16b\n"
                 "mov v1.16b, %11.16b\n"
@@ -125,7 +128,10 @@ box64context_t *my_context = NULL;
                 "mov v5.16b, %15.16b\n"
                 "mov v6.16b, %16.16b\n"
                 "mov v7.16b, %17.16b\n"
+                "sub sp, sp, #16\n"
+                "str %w21, [sp, #8]\n"
                 "blr %18\n"
+                "add sp, sp, #16\n"
                 "mov %0, x0\n"
                 "mov %1, x1\n"
                 "mov %2.16b, v0.16b\n"
@@ -134,13 +140,15 @@ box64context_t *my_context = NULL;
                 : "r"(emu->regs[_RDI].q[0]), "r"(emu->regs[_RSI].q[0]), "r"(emu->regs[_RDX].q[0]), "r"(emu->regs[_RCX].q[0]),
                   "r"(emu->regs[_R8].q[0]), "r"(emu->regs[_R9].q[0]),  "w"(emu->xmm[0].u128), "w"(emu->xmm[1].u128), "w"(emu->xmm[2].u128),
                   "w"(emu->xmm[3].u128), "w"(emu->xmm[4].u128), "w"(emu->xmm[5].u128), "w"(emu->xmm[6].u128),
-                  "w"(emu->xmm[7].u128), "r"(hleFunc)
+                  "w"(emu->xmm[7].u128), "r"(hleFunc), "r"(*(uint64_t*)(emu->regs[_RSP].q[0]+8)), "r"(*(uint64_t*)(emu->regs[_RSP].q[0]+16)),
+                  "r"(*(uint64_t*)(emu->regs[_RSP].q[0]+24))
                 : "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",  // Clobber volatile general-purpose registers
                     "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17",
                     "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",  // Clobber volatile SIMD registers
                     "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", 
                     "memory", "cc"  // Clobber memory and condition codes
             );
+            *(uint64_t*)(emu->regs[_RSP].q[0]) = return_addr;
             // emu->regs[_RAX].q[0] = hleFunc(
             //     emu->regs[_RDI].q[0],
             //     emu->regs[_RSI].q[0],
@@ -161,6 +169,11 @@ box64context_t *my_context = NULL;
             // );
         } else if (num == 20) {
             emu->quit = 1;
+         } else if (num == 21) {
+            u64 next;
+            memcpy(&next, (uint8_t*)addr, 8);
+            LOG_INFO(Core_Linker, "Called: {} @{:x} RDI: {}", ((char*)addr + 8), next, emu->regs[_RDI].q[0]);
+            emu->ip.q[0] = next;
         } else {
             for(;;) {
                 printf("Interruption %d at %p\n", num, addr);
@@ -222,8 +235,8 @@ box64context_t *my_context = NULL;
 
     void* GetSegmentBase(uint32_t desc)
     {
-        printf("GetSegmentBase\n");
-        return NULL;
+        printf("GetSegmentBase %d\n", desc);
+        return Core::GetTcbBase();
     }
 
     uint64_t RunFunctionWithEmu(x64emu_t *emu, int QuitOnLongJump, uintptr_t fnc, int nargs, ...) {
@@ -272,35 +285,68 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
                  : "rax", "rsi", "rdi");
 #else
 
-uint64_t rsp = GetRSP(emu);
+    uint64_t rsp = GetRSP(emu);
 
-rsp = rsp & ~16;
-uint8_t* code = (uint8_t*)malloc(2);
-            code[0] = 0xCD;
-            code[1] = 0x14;
-            rsp -= 8;
+    rsp = rsp & ~16;
+    static uint8_t code[2];
+    code[0] = 0xCD;
+    code[1] = 0x14;
+    rsp -= 8;
+    *(uint8_t**)rsp = code;
 
-        for (int i = params->argc; i > 0; i--) {
-            rsp = rsp - 8;
-            *(void**)rsp = &params->argv[i - 1];
-        }
-
+    for (int i = params->argc; i > 0; i--) {
         rsp = rsp - 8;
-        *(u64*)rsp = params->argc;
+        *(void**)rsp = &params->argv[i - 1];
+    }
 
-        uint64_t rsi = (u64)params;
-        uint64_t rdi = (u64)exit_func;
+    rsp = rsp - 8;
+    *(u64*)rsp = params->argc;
 
-        SetRIP(emu, addr);
-        SetRSP(emu, rsp);
-        SetRSI(emu, rsi);
-        SetRDI(emu, rdi);
-        emu->quit = 0;
+    uint64_t rsi = (u64)params;
+    uint64_t rdi = (u64)exit_func;
 
-        Run(emu, 0);
+    SetRIP(emu, addr);
+    SetRSP(emu, rsp);
+    SetRSI(emu, rsi);
+    SetRDI(emu, rdi);
+    emu->quit = 0;
+
+    Run(emu, 0);
 
     UNIMPLEMENTED_MSG("Missing RunMainEntry() implementation for target CPU architecture.");
 #endif
+}
+
+void* RunThreadEntry(u64 thread, void* arg) {
+    emu = NewX64Emu(my_context, 0, (uintptr_t)0, 0, 0);
+
+    auto* linker = Common::Singleton<Core::Linker>::Instance();
+
+    thread_set_emu(emu);
+
+    auto rsp = (uint8_t*)malloc(2 * 1024 * 1024) + 2 * 1024 * 1024;
+    SetRSP(emu, (u64)rsp);
+
+    linker->InitTlsForThread(false);
+
+    uint8_t code[2];
+    code[0] = 0xCD;
+    code[1] = 0x14;
+    rsp -= 8;
+    *(uint8_t**)rsp = code;
+    SetRIP(emu, thread);
+    SetRSP(emu, (u64)rsp);
+    SetRDI(emu, (u64)arg);
+
+    emu->quit = 0;
+
+    Run(emu, 0);
+
+    auto rv = emu->regs[_RAX].q[0];
+    // no need here, freed automatically by thread_set_emu cleanup
+    // FreeX64Emu(&emu);
+
+    return (void*)rv;
 }
 
 Linker::Linker() : memory{Memory::Instance()} {}
@@ -357,7 +403,7 @@ void Linker::Execute() {
     for (auto& m : m_modules) {
         if (m->IsSharedLib()) {
             // m->Start(0, nullptr, nullptr);
-            LOG_DEBUG(Core_Linker, "Starting shared library module {}", m->name);
+            LOG_INFO(Core_Linker, "Starting shared library module {}", m->name);
             const VAddr addr = m->dynamic_info.init_virtual_addr + m->GetBaseAddress();
             uint8_t* code = (uint8_t*)malloc(2);
             code[0] = 0xCD;
@@ -385,7 +431,7 @@ void Linker::Execute() {
 
     for (auto& m : m_modules) {
         if (!m->IsSharedLib()) {
-            LOG_DEBUG(Core_Linker, "Starting main library module {}", m->name);
+            LOG_INFO(Core_Linker, "Starting main library module {}", m->name);
             SetRSP(emu, stack_top);
             RunMainEntry(m->GetEntryAddress(), &p, ProgramExitFunc);
         }
@@ -552,6 +598,12 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
 
     const auto* record = m_hle_symbols.FindSymbol(sr);
 
+    if (record) {
+        *return_info = *record;
+
+        return true;
+    }
+
     if (!record) {
         // Check if it an export function
         const auto* p = FindExportedModule(*module, *library);
@@ -562,6 +614,17 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     if (record) {
         *return_info = *record;
 
+#if 0 // Set to 1 to log all symbol calls
+        const auto aeronid = AeroLib::FindByNid(sr.name.c_str());
+        if (aeronid) {
+            uint8_t* stub = (uint8_t*)malloc(2 + 8 + strlen(aeronid->name) + 1);
+            stub[0] = 0xCD;
+            stub[1] = 0x15;
+            memcpy(&stub[2], &return_info->virtual_address, 8);
+            strcpy((char*)&stub[10], aeronid->name);
+            return_info->virtual_address = (uint64_t)stub;
+        }
+#endif
         return true;
     }
 
@@ -576,6 +639,24 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
     LOG_ERROR(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
               return_info->name, library->name, module->name);
     return false;
+}
+
+void* heap_api_malloc(Core::HeapAPI* heap_api, size_t size) {
+    static uint8_t code[2];
+    code[0] = 0xCD;
+    code[1] = 0x14;
+
+    uint64_t rsp = GetRSP(emu);
+    rsp -= 8;
+    *(uint8_t**)rsp = code;
+
+    SetRIP(emu, (u64)heap_api->heap_malloc);
+    SetRSP(emu, rsp);
+    SetRDI(emu, size);
+
+    Run(emu, 0);
+
+    return (void*)emu->regs[_RAX].q[0];
 }
 
 void* Linker::TlsGetAddr(u64 module_index, u64 offset) {
@@ -604,7 +685,7 @@ void* Linker::TlsGetAddr(u64 module_index, u64 offset) {
         Module* module = m_modules[module_index - 1].get();
         const u32 init_image_size = module->tls.init_image_size;
         // TODO: Determine if Windows will crash from this
-        u8* dest = reinterpret_cast<u8*>(heap_api->heap_malloc(module->tls.image_size));
+        u8* dest = reinterpret_cast<u8*>(heap_api_malloc(heap_api, module->tls.image_size));
         const u8* src = reinterpret_cast<const u8*>(module->tls.image_virtual_addr);
         std::memcpy(dest, src, init_image_size);
         std::memset(dest + init_image_size, 0, module->tls.image_size - init_image_size);
@@ -636,7 +717,7 @@ void Linker::InitTlsForThread(bool is_primary) {
     } else {
         if (heap_api) {
 #ifndef WIN32
-            addr_out = heap_api->heap_malloc(total_tls_size);
+            addr_out = heap_api_malloc(heap_api, total_tls_size);
         } else {
             addr_out = std::malloc(total_tls_size);
 #else
