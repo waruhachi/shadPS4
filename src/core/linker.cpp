@@ -288,27 +288,21 @@ static void RunMainEntry(VAddr addr, EntryParams* params, ExitFunc exit_func) {
     uint64_t rsp = GetRSP(emu);
 
     rsp = rsp & ~16;
-    static uint8_t code[2];
-    code[0] = 0xCD;
-    code[1] = 0x14;
     rsp -= 8;
-    *(uint8_t**)rsp = code;
 
-    for (int i = params->argc; i > 0; i--) {
-        rsp = rsp - 8;
-        *(void**)rsp = &params->argv[i - 1];
-    }
+    rsp = rsp - 8;
+    *(void**)rsp = params->argv;
 
     rsp = rsp - 8;
     *(u64*)rsp = params->argc;
 
-    uint64_t rsi = (u64)params;
-    uint64_t rdi = (u64)exit_func;
+    uint64_t rdi = (u64)params;
+    uint64_t rsi = (u64)exit_func;
 
     SetRIP(emu, addr);
     SetRSP(emu, rsp);
-    SetRSI(emu, rsi);
     SetRDI(emu, rdi);
+    SetRSI(emu, rsi);
     emu->quit = 0;
 
     Run(emu, 0);
