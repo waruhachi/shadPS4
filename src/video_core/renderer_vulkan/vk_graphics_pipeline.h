@@ -5,7 +5,7 @@
 #include "common/types.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/renderer_vulkan/vk_compute_pipeline.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 
 namespace VideoCore {
 class BufferCache;
@@ -26,6 +26,7 @@ using Liverpool = AmdGpu::Liverpool;
 struct GraphicsPipelineKey {
     std::array<size_t, MaxShaderStages> stage_hashes;
     std::array<vk::Format, Liverpool::NumColorBuffers> color_formats;
+    std::array<AmdGpu::NumberFormat, Liverpool::NumColorBuffers> color_num_formats;
     std::array<Liverpool::ColorBuffer::SwapMode, Liverpool::NumColorBuffers> mrt_swizzles;
     vk::Format depth_format;
     vk::Format stencil_format;
@@ -33,6 +34,7 @@ struct GraphicsPipelineKey {
     Liverpool::DepthControl depth_stencil;
     u32 depth_bias_enable;
     u32 num_samples;
+    u32 mrt_mask;
     Liverpool::StencilControl stencil;
     Liverpool::PrimitiveType prim_type;
     u32 enable_primitive_restart;
@@ -44,31 +46,23 @@ struct GraphicsPipelineKey {
     Liverpool::ColorBufferMask cb_shader_mask;
     std::array<Liverpool::BlendControl, Liverpool::NumColorBuffers> blend_controls;
     std::array<vk::ColorComponentFlags, Liverpool::NumColorBuffers> write_masks;
+    std::array<vk::Format, MaxVertexBufferCount> vertex_buffer_formats;
 
     bool operator==(const GraphicsPipelineKey& key) const noexcept {
         return std::memcmp(this, &key, sizeof(key)) == 0;
     }
 };
 
-class GraphicsPipeline {
+class GraphicsPipeline : public Pipeline {
 public:
-    explicit GraphicsPipeline(const Instance& instance, Scheduler& scheduler,
-                              DescriptorHeap& desc_heap, const GraphicsPipelineKey& key,
-                              vk::PipelineCache pipeline_cache,
-                              std::span<const Shader::Info*, MaxShaderStages> stages,
-                              std::span<const vk::ShaderModule> modules);
+    GraphicsPipeline(const Instance& instance, Scheduler& scheduler, DescriptorHeap& desc_heap,
+                     const GraphicsPipelineKey& key, vk::PipelineCache pipeline_cache,
+                     std::span<const Shader::Info*, MaxShaderStages> stages,
+                     std::span<const vk::ShaderModule> modules);
     ~GraphicsPipeline();
 
     void BindResources(const Liverpool::Regs& regs, VideoCore::BufferCache& buffer_cache,
                        VideoCore::TextureCache& texture_cache) const;
-
-    vk::Pipeline Handle() const noexcept {
-        return *pipeline;
-    }
-
-    vk::PipelineLayout GetLayout() const {
-        return *pipeline_layout;
-    }
 
     const Shader::Info& GetStage(Shader::Stage stage) const noexcept {
         return *stages[u32(stage)];
@@ -83,20 +77,28 @@ public:
         return key.write_masks;
     }
 
+    auto GetMrtMask() const {
+        return key.mrt_mask;
+    }
+
     bool IsDepthEnabled() const {
         return key.depth_stencil.depth_enable.Value();
+    }
+
+    [[nodiscard]] bool IsPrimitiveListTopology() const {
+        return key.prim_type == Liverpool::PrimitiveType::PointList ||
+               key.prim_type == Liverpool::PrimitiveType::LineList ||
+               key.prim_type == Liverpool::PrimitiveType::TriangleList ||
+               key.prim_type == Liverpool::PrimitiveType::AdjLineList ||
+               key.prim_type == Liverpool::PrimitiveType::AdjTriangleList ||
+               key.prim_type == Liverpool::PrimitiveType::RectList ||
+               key.prim_type == Liverpool::PrimitiveType::QuadList;
     }
 
 private:
     void BuildDescSetLayout();
 
 private:
-    const Instance& instance;
-    Scheduler& scheduler;
-    DescriptorHeap& desc_heap;
-    vk::UniquePipeline pipeline;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniqueDescriptorSetLayout desc_layout;
     std::array<const Shader::Info*, MaxShaderStages> stages{};
     GraphicsPipelineKey key;
     bool uses_push_descriptors{};

@@ -233,6 +233,7 @@ void DefineEntryPoint(const IR::Program& program, EmitContext& ctx, Id main) {
             ctx.AddExecutionMode(main, spv::ExecutionMode::OriginUpperLeft);
         }
         if (info.has_discard) {
+            ctx.AddExtension("SPV_EXT_demote_to_helper_invocation");
             ctx.AddCapability(spv::Capability::DemoteToHelperInvocationEXT);
         }
         if (info.stores.Get(IR::Attribute::Depth)) {
@@ -265,7 +266,7 @@ void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
 } // Anonymous namespace
 
 std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_info,
-                           const IR::Program& program, u32& binding) {
+                           const IR::Program& program, Bindings& binding) {
     EmitContext ctx{profile, runtime_info, program.info, binding};
     const Id main{DefineMain(ctx, program)};
     DefineEntryPoint(program, ctx, main);

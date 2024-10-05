@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 if(APPLE)
     enable_language(OBJC)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 11)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
 endif()
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -95,6 +95,7 @@ include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REF_SPEC GIT_REV)
 git_describe(GIT_DESC --always --long --dirty)
 git_branch_name(GIT_BRANCH)
+string(TIMESTAMP BUILD_DATE "%Y-%m-%d %H:%M:%S")
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/common/scm_rev.cpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/src/common/scm_rev.cpp" @ONLY)
 
@@ -143,7 +144,7 @@ add_subdirectory(externals)
 include_directories(src)
 
 if(ENABLE_QT_GUI)
-    find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent LinguistTools Network)
+    find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent LinguistTools Network Multimedia)
     qt_standard_project_setup()
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOMOC ON)
@@ -232,11 +233,18 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/system/msgdialog_ui.cpp
                 src/core/libraries/system/posix.cpp
                 src/core/libraries/system/posix.h
-                src/core/libraries/save_data/error_codes.h
+                src/core/libraries/save_data/save_backup.cpp
+                src/core/libraries/save_data/save_backup.h
+                src/core/libraries/save_data/save_instance.cpp
+                src/core/libraries/save_data/save_instance.h
+                src/core/libraries/save_data/save_memory.cpp
+                src/core/libraries/save_data/save_memory.h
                 src/core/libraries/save_data/savedata.cpp
                 src/core/libraries/save_data/savedata.h
-                src/core/libraries/system/savedatadialog.cpp
-                src/core/libraries/system/savedatadialog.h
+                src/core/libraries/save_data/dialog/savedatadialog.cpp
+                src/core/libraries/save_data/dialog/savedatadialog.h
+                src/core/libraries/save_data/dialog/savedatadialog_ui.cpp
+                src/core/libraries/save_data/dialog/savedatadialog_ui.h
                 src/core/libraries/system/sysmodule.cpp
                 src/core/libraries/system/sysmodule.h
                 src/core/libraries/system/systemservice.cpp
@@ -330,6 +338,19 @@ set(MISC_LIBS  src/core/libraries/screenshot/screenshot.cpp
                src/core/libraries/screenshot/screenshot.h
 )
 
+set(DEV_TOOLS src/core/devtools/layer.cpp
+              src/core/devtools/layer.h
+              src/core/devtools/gcn/gcn_context_regs.cpp
+              src/core/devtools/gcn/gcn_op_names.cpp
+              src/core/devtools/gcn/gcn_shader_regs.cpp
+              src/core/devtools/widget/cmd_list.cpp
+              src/core/devtools/widget/cmd_list.h
+              src/core/devtools/widget/frame_dump.cpp
+              src/core/devtools/widget/frame_dump.h
+              src/core/devtools/widget/frame_graph.cpp
+              src/core/devtools/widget/frame_graph.h
+)
+
 set(COMMON src/common/logging/backend.cpp
            src/common/logging/backend.h
            src/common/logging/filter.cpp
@@ -349,9 +370,11 @@ set(COMMON src/common/logging/backend.cpp
            src/common/concepts.h
            src/common/config.cpp
            src/common/config.h
+           src/common/cstring.h
            src/common/debug.h
-           src/common/disassembler.cpp
-           src/common/disassembler.h
+           src/common/decoder.cpp
+           src/common/decoder.h
+           src/common/elf_info.h
            src/common/endian.h
            src/common/enum.h
            src/common/io_file.cpp
@@ -369,6 +392,8 @@ set(COMMON src/common/logging/backend.cpp
            src/common/polyfill_thread.h
            src/common/rdtsc.cpp
            src/common/rdtsc.h
+           src/common/signal_context.h
+           src/common/signal_context.cpp
            src/common/singleton.h
            src/common/slot_vector.h
            src/common/string_util.cpp
@@ -437,6 +462,9 @@ set(CORE src/core/aerolib/stubs.cpp
          ${USBD_LIB}
          ${MISC_LIBS}
          ${DIALOGS_LIB}
+         ${DEV_TOOLS}
+         src/core/debug_state.cpp
+         src/core/debug_state.h
          src/core/linker.cpp
          src/core/linker.h
          src/core/memory.cpp
@@ -466,6 +494,7 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/params.h
                       src/shader_recompiler/runtime_info.h
                       src/shader_recompiler/specialization.h
+                      src/shader_recompiler/backend/bindings.h
                       src/shader_recompiler/backend/spirv/emit_spirv.cpp
                       src/shader_recompiler/backend/spirv/emit_spirv.h
                       src/shader_recompiler/backend/spirv/emit_spirv_atomic.cpp
@@ -571,6 +600,8 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/renderer_vulkan/vk_master_semaphore.h
                src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
                src/video_core/renderer_vulkan/vk_pipeline_cache.h
+               src/video_core/renderer_vulkan/vk_pipeline_common.cpp
+               src/video_core/renderer_vulkan/vk_pipeline_common.h
                src/video_core/renderer_vulkan/vk_platform.cpp
                src/video_core/renderer_vulkan/vk_platform.h
                src/video_core/renderer_vulkan/vk_rasterizer.cpp
@@ -607,14 +638,15 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
 set(IMGUI src/imgui/imgui_config.h
           src/imgui/imgui_layer.h
           src/imgui/imgui_std.h
-          src/imgui/layer/video_info.cpp
-          src/imgui/layer/video_info.h
+          src/imgui/imgui_texture.h
           src/imgui/renderer/imgui_core.cpp
           src/imgui/renderer/imgui_core.h
           src/imgui/renderer/imgui_impl_sdl3.cpp
           src/imgui/renderer/imgui_impl_sdl3.h
           src/imgui/renderer/imgui_impl_vulkan.cpp
           src/imgui/renderer/imgui_impl_vulkan.h
+          src/imgui/renderer/texture_manager.cpp
+          src/imgui/renderer/texture_manager.h
 )
 
 set(INPUT src/input/controller.cpp
@@ -635,8 +667,12 @@ qt_add_resources(RESOURCE_FILES src/shadps4.qrc)
 set(QT_GUI src/qt_gui/about_dialog.cpp
            src/qt_gui/about_dialog.h
            src/qt_gui/about_dialog.ui
+           src/qt_gui/background_music_player.cpp
+           src/qt_gui/background_music_player.h
            src/qt_gui/cheats_patches.cpp
            src/qt_gui/cheats_patches.h
+           src/qt_gui/check_update.cpp
+           src/qt_gui/check_update.h
            src/qt_gui/main_window_ui.h
            src/qt_gui/main_window.cpp
            src/qt_gui/main_window.h
@@ -701,7 +737,7 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn)
 target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis glslang::SPIRV glslang::glslang SDL3::SDL3 pugixml::pugixml)
 
 target_compile_definitions(shadps4 PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
@@ -740,7 +776,7 @@ else()
 endif()
 
 if (ENABLE_QT_GUI)
-   target_link_libraries(shadps4 PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network)
+   target_link_libraries(shadps4 PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Multimedia)
    add_definitions(-DENABLE_QT_GUI)
 endif()
 
@@ -795,6 +831,11 @@ set(HOST_SHADERS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src/video_core/host_shaders
 add_subdirectory(${HOST_SHADERS_INCLUDE})
 add_dependencies(shadps4 host_shaders)
 target_include_directories(shadps4 PRIVATE ${HOST_SHADERS_INCLUDE})
+
+# ImGui resources
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/renderer)
+add_dependencies(shadps4 ImGui_Resources)
+target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
 
 if (ENABLE_QT_GUI)
     set_target_properties(shadps4 PROPERTIES
